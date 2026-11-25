@@ -95,3 +95,12 @@ snapshot and `--plain` prints a new block only when the status changes (no
 screen clearing, easy to copy). No remaining-time estimate is given because
 the number of optimisation cycles is not known in advance. Tested live on a
 benzene optimisation + frequencies run with ORCA 6.1.1.
+
+## Plots
+
+`orca-assistant plot opt file.out` draws the energy of each optimisation cycle
+relative to the last one (kcal/mol); `orca-assistant plot ir file.out
+[--scale 0.97] [--fwhm 20]` draws the calculated IR spectrum with Lorentzian
+broadening. Plots need matplotlib: `pip install "orca-assistant[plot]"`. The
+frequency scale factor depends on the functional and basis set; the default is
+1.0 (unscaled).

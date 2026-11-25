@@ -8,6 +8,7 @@ dependencies = ["pydantic>=2.5"]
 [project.optional-dependencies]
 dev = ["pytest"]
 llm = ["anthropic>=0.40"]
+plot = ["matplotlib>=3.5"]
 
 [project.scripts]
 orca-assistant = "orca_assistant.cli:main"

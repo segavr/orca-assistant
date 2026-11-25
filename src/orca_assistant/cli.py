@@ -10,6 +10,7 @@ from pathlib import Path
 from .extract import extract, parse_geometries, write_xyz
 from .lint import lint
 from .parser import ParsedOutput, parse_file
+from .plot import PlotUnavailable, plot_ir, plot_opt
 from .render import render_input
 from .resources import detect_hardware, suggest_resources
 from .spec import CalcSpec, atoms_from_xyz
@@ -183,6 +184,21 @@ def cmd_watch(args) -> int:
         return 0
 
 
+def cmd_plot(args) -> int:
+    ex = extract(args.file.read_text(errors="replace"))
+    dest = args.output or args.file.with_name(f"{args.file.stem}_{args.kind}.png")
+    try:
+        if args.kind == "opt":
+            plot_opt(ex.opt_steps, dest)
+        else:
+            plot_ir(ex.ir_modes, dest, scale=args.scale, fwhm=args.fwhm)
+    except (PlotUnavailable, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {dest}", file=sys.stderr)
+    return 0
+
+
 def cmd_parse(args) -> int:
     res = parse_file(args.output)
     extras = extract(args.output.read_text(errors="replace"))
@@ -254,6 +270,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="no screen clearing: print a new block only when the status changes "
                         "(easy to copy)")
     w.set_defaults(func=cmd_watch)
+
+    pl = sub.add_parser("plot", help="PNG plot from an .out file: optimisation profile or IR spectrum")
+    pl.add_argument("kind", choices=["opt", "ir"])
+    pl.add_argument("file", type=Path)
+    pl.add_argument("-o", "--output", type=Path, help="default: <file>_<kind>.png next to the .out")
+    pl.add_argument("--scale", type=float, default=1.0,
+                    help="frequency scaling factor for the IR plot (default 1.0, i.e. unscaled)")
+    pl.add_argument("--fwhm", type=float, default=20.0,
+                    help="IR band width in cm-1 (default 20)")
+    pl.set_defaults(func=cmd_plot)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)
