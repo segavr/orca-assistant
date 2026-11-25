@@ -137,3 +137,11 @@ submitted to a real SLURM or PBS scheduler. Module names, partitions and
 whether `module` works in non-login shells differ between clusters, so check
 the script once before relying on it. PBS support targets PBS Pro / OpenPBS
 (`select=...` syntax); Torque is not supported.
+
+## Troubleshooting
+
+**`orca` is not ORCA.** On many desktop Linux systems `/usr/bin/orca` is the
+GNOME screen reader. `run`, `queue` and the generated batch scripts use the
+first `orca` found in `PATH`: check with `which -a orca` that the
+quantum-chemistry ORCA comes first, or pass its full path
+(`submit --orca /path/to/orca`).
