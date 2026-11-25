@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .batch import DEFAULT_TIME, SCHEDULERS, SUBMIT_COMMAND, SUFFIX, BatchSpec, build_script
+from .batch import submit as submit_script
 from .extract import extract, parse_geometries, write_xyz
 from .lint import lint
 from .parser import ParsedOutput, parse_file
@@ -214,6 +216,36 @@ def cmd_queue(args) -> int:
     return 0 if all_ok(results) else 1
 
 
+def cmd_submit(args) -> int:
+    if not args.input.exists():
+        print(f"input file not found: {args.input}", file=sys.stderr)
+        return 3
+    spec = BatchSpec(args.scheduler, args.input, time=args.time, mem_mb=args.mem_mb,
+                     partition=args.partition, account=args.account,
+                     modules=args.module or [], orca=args.orca, scratch=args.scratch,
+                     copy_files=args.copy_files or [], name=args.name)
+    try:
+        text, notes = build_script(spec)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    dest = args.output or args.input.with_suffix(SUFFIX[args.scheduler])
+    dest.write_text(text)
+    for note in notes:
+        print(f"[note] {note}", file=sys.stderr)
+    print(f"wrote {dest}", file=sys.stderr)
+    if args.submit:
+        try:
+            code, msg = submit_script(dest, args.scheduler)
+        except RuntimeError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(msg)
+        return code
+    print(f"submit with: {SUBMIT_COMMAND[args.scheduler]} {dest}", file=sys.stderr)
+    return 0
+
+
 def cmd_parse(args) -> int:
     res = parse_file(args.output)
     extras = extract(args.output.read_text(errors="replace"))
@@ -307,6 +339,32 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--force", action="store_true",
                    help="rerun jobs whose .out already finished normally")
     q.set_defaults(func=cmd_queue)
+
+    sb = sub.add_parser("submit", help="write a SLURM or PBS batch script for an .inp "
+                                       "(cores and memory are read from the input)")
+    sb.add_argument("input", type=Path)
+    sb.add_argument("--scheduler", required=True, choices=list(SCHEDULERS),
+                    help="slurm, or pbs (PBS Pro / OpenPBS; Torque is not supported)")
+    sb.add_argument("--time", default=DEFAULT_TIME,
+                    help=f"wall time, HH:MM:SS or D-HH:MM:SS (default {DEFAULT_TIME})")
+    sb.add_argument("--mem-mb", type=int,
+                    help="total memory to request (default: nprocs x maxcore x 1.3)")
+    sb.add_argument("--partition", "--queue", dest="partition",
+                    help="SLURM partition / PBS queue")
+    sb.add_argument("--account", help="accounting project")
+    sb.add_argument("--module", action="append",
+                    help="module to load (repeat for several, e.g. --module openmpi/4.1.8)")
+    sb.add_argument("--orca", help="absolute path to the orca executable "
+                                   "(default: `orca` found in PATH when the job runs)")
+    sb.add_argument("--scratch", help="run in <DIR>/<jobid> and copy results back, "
+                                      "e.g. /scratch/$USER")
+    sb.add_argument("--copy-files", action="append",
+                    help="extra input file to copy to scratch (repeatable; needs --scratch)")
+    sb.add_argument("--name", help="job name (default: the input's name)")
+    sb.add_argument("-o", "--output", type=Path, help="script path (default: next to the .inp)")
+    sb.add_argument("--submit", action="store_true",
+                    help="also run sbatch/qsub (only on a cluster login node)")
+    sb.set_defaults(func=cmd_submit)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)

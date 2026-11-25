@@ -118,3 +118,22 @@ everything). A failed job does not stop the queue; a summary table is printed
 at the end and `Ctrl+C` stops the running jobs cleanly. Sequential runs,
 skipping and failure handling were tested live with ORCA 6.1.1; the parallel
 mode is covered by tests with a fake process only.
+
+## Cluster scripts (SLURM / PBS)
+
+`orca-assistant submit job.inp --scheduler slurm|pbs [--time HH:MM:SS]
+[--partition P] [--account A] [--module M ...] [--orca /full/path/orca]
+[--scratch /scratch/$USER] [--copy-files F ...] [--submit]` writes a batch
+script next to the input. Cores and `%maxcore` are read from the input; the
+memory request is `nprocs x maxcore x 1.3` (ORCA's `%maxcore` is a soft limit)
+unless `--mem-mb` is given. The script calls ORCA by its full path (required
+for parallel runs); with `--scratch` it runs in `<DIR>/<jobid>`, copies the
+results back (also when ORCA fails, keeping ORCA's exit status) and removes
+the scratch directory.
+
+Status: the generated scripts are tested with `bash -n`, with a fake ORCA and
+with ORCA 6.1.1 run locally through the script, but they have not been
+submitted to a real SLURM or PBS scheduler. Module names, partitions and
+whether `module` works in non-login shells differ between clusters, so check
+the script once before relying on it. PBS support targets PBS Pro / OpenPBS
+(`select=...` syntax); Torque is not supported.
