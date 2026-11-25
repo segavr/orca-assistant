@@ -60,7 +60,9 @@ def plot_opt(steps: list[OptStep], path: Path) -> Path:
     if not profiles:
         raise ValueError("need at least 2 optimisation cycles with energies to plot")
     plt = _pyplot()
+    from matplotlib.ticker import MaxNLocator
     fig, ax = plt.subplots(figsize=(6, 4))
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     for job, cycles, rel in profiles:
         label = f"optimisation {job}" if len(profiles) > 1 else None
         ax.plot(cycles, rel, marker="o", label=label)

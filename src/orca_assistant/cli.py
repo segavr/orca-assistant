@@ -10,6 +10,7 @@ from pathlib import Path
 from .extract import extract, parse_geometries, write_xyz
 from .lint import lint
 from .parser import ParsedOutput, parse_file
+from .jobqueue import all_ok, format_results, run_queue
 from .plot import PlotUnavailable, plot_ir, plot_opt
 from .render import render_input
 from .resources import detect_hardware, suggest_resources
@@ -199,6 +200,20 @@ def cmd_plot(args) -> int:
     return 0
 
 
+def cmd_queue(args) -> int:
+    orca = shutil.which("orca")
+    if not orca:
+        print("ORCA not found in PATH.", file=sys.stderr)
+        return 2
+    results, interrupted = run_queue(args.inputs, orca, detect_hardware(),
+                                     max_jobs=args.jobs, max_procs=args.max_procs,
+                                     max_mem_mb=args.max_mem_mb, force=args.force)
+    sys.stdout.write(format_results(results))
+    if interrupted:
+        return 130
+    return 0 if all_ok(results) else 1
+
+
 def cmd_parse(args) -> int:
     res = parse_file(args.output)
     extras = extract(args.output.read_text(errors="replace"))
@@ -280,6 +295,18 @@ def build_parser() -> argparse.ArgumentParser:
     pl.add_argument("--fwhm", type=float, default=20.0,
                     help="IR band width in cm-1 (default 20)")
     pl.set_defaults(func=cmd_plot)
+
+    q = sub.add_parser("queue", help="run several .inp files one after another "
+                                     "(or in parallel if cores and memory allow)")
+    q.add_argument("inputs", nargs="+", type=Path)
+    q.add_argument("--jobs", type=int, default=1,
+                   help="max simultaneous jobs (default 1); limited by cores and memory")
+    q.add_argument("--max-procs", type=int, help="core budget (default: detected physical cores)")
+    q.add_argument("--max-mem-mb", type=int,
+                   help="memory budget in MB (default: 75%% of the RAM available now)")
+    q.add_argument("--force", action="store_true",
+                   help="rerun jobs whose .out already finished normally")
+    q.set_defaults(func=cmd_queue)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)

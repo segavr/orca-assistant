@@ -104,3 +104,17 @@ relative to the last one (kcal/mol); `orca-assistant plot ir file.out
 broadening. Plots need matplotlib: `pip install "orca-assistant[plot]"`. The
 frequency scale factor depends on the functional and basis set; the default is
 1.0 (unscaled).
+
+## Job queue
+
+`orca-assistant queue a.inp b.inp ... [--jobs N] [--max-procs N]
+[--max-mem-mb MB] [--force]` runs several inputs. By default they run one at a
+time; with `--jobs N` up to N run together, but only while the total `nprocs`
+and `nprocs x maxcore` (read from each input) fit the detected cores and the
+available memory. A job larger than the budget runs alone, with a warning.
+Inputs whose `.out` already finished normally are skipped, so rerunning the
+same command after a crash resumes the queue (`--force` recomputes
+everything). A failed job does not stop the queue; a summary table is printed
+at the end and `Ctrl+C` stops the running jobs cleanly. Sequential runs,
+skipping and failure handling were tested live with ORCA 6.1.1; the parallel
+mode is covered by tests with a fake process only.
