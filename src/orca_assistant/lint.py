@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .resources import Hardware, suggest_resources
-from .spec import CalcSpec, Task
+from .spec import CalcSpec, Resources, Task
 
 
 @dataclass
@@ -17,10 +17,10 @@ def _gib(mb: int) -> str:
     return f"{mb / 1024:.1f} GiB"
 
 
-def check_hardware(spec: CalcSpec, hw: Hardware) -> list[Issue]:
+def check_hardware(resources: Resources, hw: Hardware) -> list[Issue]:
     """Compare the requested nprocs x maxcore with the machine."""
     issues: list[Issue] = []
-    r = spec.resources
+    r = resources
     need = r.nprocs * r.maxcore_mb
     sug = suggest_resources(hw)
     hint = f" Suggested for this machine: nprocs={sug.nprocs}, maxcore={sug.maxcore_mb}."
@@ -48,15 +48,14 @@ def check_hardware(spec: CalcSpec, hw: Hardware) -> list[Issue]:
 def lint(spec: CalcSpec, hardware: Hardware | None = None) -> list[Issue]:
     issues: list[Issue] = []
     m = spec.method
-    name = m.functional.lower()
 
     if m.is_composite and (m.basis or m.dispersion):
         issues.append(Issue("warning",
             "Composite -3c method: basis/dispersion fields are ignored in the input."))
-    if not m.is_composite and m.dispersion and ("-d3" in name or "-d4" in name):
+    if not m.is_composite and m.dispersion and m.carries_dispersion:
         issues.append(Issue("warning",
             f"{m.functional} already contains a dispersion correction; "
-            f"also adding {m.dispersion} would double-count it."))
+            f"{m.dispersion} is not added to the input, it would double-count it."))
     if not m.is_composite and not m.basis:
         issues.append(Issue("warning", "No basis set specified for a non-composite method."))
     if spec.task == Task.TS:
@@ -70,5 +69,5 @@ def lint(spec: CalcSpec, hardware: Hardware | None = None) -> list[Issue]:
         issues.append(Issue("info",
             "Large system with few cores; consider increasing nprocs."))
     if hardware is not None:
-        issues.extend(check_hardware(spec, hardware))
+        issues.extend(check_hardware(spec.resources, hardware))
     return issues

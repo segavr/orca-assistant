@@ -39,15 +39,70 @@ class Atom(BaseModel):
         return v
 
 
+def _atoms_from_rows(rows: list[tuple[int, str]]) -> list[Atom]:
+    """Atom lines ('element x y z'); every error names the source line."""
+    atoms: list[Atom] = []
+    for lineno, line in rows:
+        parts = line.split()
+        if len(parts) < 4:
+            raise ValueError(
+                f"XYZ line {lineno}: expected 'element x y z', got {line.strip()!r}")
+        element = parts[0].strip().capitalize()
+        if element not in ATOMIC_NUMBER:
+            raise ValueError(f"XYZ line {lineno}: unknown element symbol {parts[0]!r}")
+        try:
+            x, y, z = (float(v) for v in parts[1:4])
+        except ValueError:
+            raise ValueError(
+                f"XYZ line {lineno}: coordinates must be numbers, got {line.strip()!r}"
+            ) from None
+        atoms.append(Atom(element=element, x=x, y=y, z=z))
+    return atoms
+
+
 def atoms_from_xyz(text: str) -> list[Atom]:
-    """Parse standard XYZ (with count + comment lines) or bare atom lines."""
-    lines = [ln.split() for ln in text.strip().splitlines() if ln.strip()]
-    if lines and len(lines[0]) == 1 and lines[0][0].isdigit():
-        lines = lines[2:]  # drop atom count and comment line
-    return [
-        Atom(element=p[0], x=float(p[1]), y=float(p[2]), z=float(p[3]))
-        for p in lines
-    ]
+    """Parse standard XYZ (count, comment, atom lines) or bare atom lines.
+
+    The count line is checked against the coordinate lines: a truncated or
+    padded file raises instead of silently producing a smaller molecule. A
+    snippet written without the comment line is accepted when the standard
+    reading does not match the declared count.
+    """
+    rows = [(n, ln) for n, ln in enumerate(text.splitlines(), 1) if ln.strip()]
+    if not rows:
+        raise ValueError("no atoms in the XYZ input")
+    head = rows[0][1].split()
+    if not (len(head) == 1 and head[0].isdigit()):
+        return _atoms_from_rows(rows)  # bare atom lines, no header
+
+    declared = int(head[0])
+    if declared < 1:
+        raise ValueError(f"XYZ header declares {declared} atoms; at least one is required")
+    body = rows[1:]
+    if not body:
+        raise ValueError(
+            f"XYZ header declares {declared} atoms but the file has no coordinate lines")
+
+    errors: list[ValueError] = []
+
+    def read(candidate: list[tuple[int, str]]) -> list[Atom]:
+        try:
+            return _atoms_from_rows(candidate)
+        except ValueError as exc:
+            errors.append(exc)
+            return []
+
+    standard = read(body[1:])  # the line after the count is a free-text comment
+    if standard and len(standard) == declared:
+        return standard
+    without_comment = read(body)
+    if without_comment and len(without_comment) == declared:
+        return without_comment
+    found = len(standard) or len(without_comment)
+    if found:
+        raise ValueError(
+            f"XYZ header declares {declared} atoms but the coordinate lines give {found}")
+    raise errors[0]
 
 
 class Molecule(BaseModel):
@@ -83,6 +138,12 @@ class Method(BaseModel):
     @property
     def is_composite(self) -> bool:
         return self.functional.lower().endswith("-3c")
+
+    @property
+    def carries_dispersion(self) -> bool:
+        """True when the functional name already encodes a D3/D4 correction."""
+        name = self.functional.lower()
+        return "-d3" in name or "-d4" in name
 
 
 class ScanSpec(BaseModel):

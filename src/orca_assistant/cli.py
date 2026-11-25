@@ -2,19 +2,62 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .extract import extract, parse_geometries, write_xyz
+from .inp import parse_inp
 from .lint import lint
 from .parser import ParsedOutput, parse_file
 from .render import render_input
 from .resources import detect_hardware, suggest_resources
+from .scheduler import JobConfig, make_script
 from .spec import CalcSpec, atoms_from_xyz
 from .table import build_rows, render_table
 from .watch import watch
+
+
+class CliError(Exception):
+    """A problem with the user's input: reported as one line, not a traceback."""
+
+
+def _read_text(path: Path, what: str) -> str:
+    if not path.exists():
+        raise CliError(f"{what} not found: {path}")
+    if not path.is_file():
+        raise CliError(f"{what} is not a regular file: {path}")
+    try:
+        return path.read_text(errors="replace")
+    except OSError as exc:
+        raise CliError(f"cannot read {what} {path}: {exc}") from None
+
+
+def _validation_message(exc: ValidationError) -> str:
+    lines = []
+    for err in exc.errors():
+        where = ".".join(str(p) for p in err["loc"])
+        msg = err["msg"].replace("Value error, ", "")
+        lines.append(f"  {where}: {msg}" if where else f"  {msg}")
+    return "\n".join(lines)
+
+
+def load_spec(path: Path) -> CalcSpec:
+    text = _read_text(path, "spec file")
+    try:
+        return CalcSpec.model_validate_json(text)
+    except ValidationError as exc:
+        if any(err.get("type") == "json_invalid" for err in exc.errors()):
+            msg = exc.errors()[0]["msg"].replace("Invalid JSON: ", "")
+            raise CliError(f"{path} is not valid JSON: {msg}") from None
+        raise CliError(f"{path} is not a valid CalcSpec:\n{_validation_message(exc)}") from None
+    except ValueError as exc:  # a decoder error pydantic did not wrap
+        raise CliError(f"{path} is not valid JSON: {exc}") from None
+
 
 
 def _print_lint(spec: CalcSpec) -> None:
@@ -27,7 +70,8 @@ def print_summary(res: ParsedOutput) -> None:
         return "n/a" if v is None else f"{v:.6f}{unit}"
 
     print(f"terminated normally : {res.terminated_normally}")
-    print(f"optimisation        : {res.opt_converged}")
+    opt = "n/a (no optimisation)" if res.opt_converged is None else str(res.opt_converged)
+    print(f"optimisation        : {opt}")
     print(f"final energy        : {fmt(res.final_energy_eh, ' Eh')}")
     if res.frequencies_cm1:
         print(f"frequencies (cm-1)  : {', '.join(f'{f:.1f}' for f in res.frequencies_cm1)}")
@@ -74,7 +118,10 @@ def print_extras(ex) -> None:
 
 def _emit(text: str, path: Path | None) -> None:
     if path:
-        path.write_text(text)
+        try:
+            path.write_text(text)
+        except OSError as exc:
+            raise CliError(f"cannot write {path}: {exc}") from None
         print(f"wrote {path}", file=sys.stderr)
     else:
         sys.stdout.write(text)
@@ -104,7 +151,7 @@ def cmd_resources(args) -> int:
 
 
 def cmd_render(args) -> int:
-    spec = CalcSpec.model_validate_json(args.spec.read_text())
+    spec = load_spec(args.spec)
     if args.auto_resources:
         spec = _auto_resources(spec)
     _print_lint(spec)
@@ -115,7 +162,11 @@ def cmd_render(args) -> int:
 def cmd_ask(args) -> int:
     from .llm import make_backend, plan_calculation
 
-    atoms = atoms_from_xyz(args.xyz.read_text())
+    text = _read_text(args.xyz, "XYZ file")
+    try:
+        atoms = atoms_from_xyz(text)
+    except ValueError as exc:
+        raise CliError(f"{args.xyz}: {exc}") from None
     backend = make_backend(args.backend, args.model, args.base_url, args.api_key_env)
     planned = plan_calculation(args.request, atoms, backend=backend)
     for note in planned.assumptions:
@@ -149,7 +200,7 @@ def cmd_run(args) -> int:
 
 
 def cmd_xyz(args) -> int:
-    geoms = parse_geometries(args.outfile.read_text(errors="replace"))
+    geoms = parse_geometries(_read_text(args.outfile, "ORCA output"))
     if not geoms:
         print("no geometry found in the file", file=sys.stderr)
         return 1
@@ -162,7 +213,10 @@ def cmd_xyz(args) -> int:
 
 
 def cmd_table(args) -> int:
-    entries = [(p.stem, parse_file(p)) for p in args.files]
+    entries = []
+    for path in args.files:
+        _read_text(path, "ORCA output")  # fail fast with one clear line
+        entries.append((path.stem, parse_file(path)))
     try:
         table = build_rows(entries, args.temperature, args.by, args.sort)
     except ValueError as exc:
@@ -184,14 +238,80 @@ def cmd_watch(args) -> int:
 
 
 def cmd_parse(args) -> int:
+    text = _read_text(args.output, "ORCA output")
     res = parse_file(args.output)
-    extras = extract(args.output.read_text(errors="replace"))
+    extras = extract(text)
     if args.json:
         print(json.dumps({**res.to_dict(), **extras.to_dict()}, indent=2, ensure_ascii=False))
         return 0
     print_summary(res)
     print_extras(extras)
     return 0 if not res.problems else 1
+
+
+def cmd_check(args) -> int:
+    text = _read_text(args.infile, "ORCA input")
+    hardware = None if args.no_hardware else detect_hardware()
+    report = parse_inp(text, args.infile, hardware)
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+        return report.exit_code()
+
+    inp = report.inp
+    print(f"file                : {args.infile}")
+    if inp.simple_line is not None:
+        print(f"simple input        : ! {inp.simple_line}  (line {inp.simple_line_no})")
+    if inp.resources is not None:
+        r = inp.resources
+        print(f"resources           : nprocs={r.nprocs}, maxcore={r.maxcore_mb} MB per core "
+              f"({r.nprocs * r.maxcore_mb / 1024:.1f} GiB in total)")
+    else:
+        print("resources           : none, ORCA uses a single process")
+    if inp.atoms:
+        print(f"molecule            : {len(inp.atoms)} atoms, charge {inp.charge}, "
+              f"multiplicity {inp.multiplicity}")
+    for scan in inp.scan:
+        values = ", ".join(f"{v:g}" for v in scan.values)
+        print(f"scan                : {scan.kind} {' '.join(map(str, scan.atoms))} = {values} "
+              f"(line {scan.line_no})")
+    for issue in report.issues:
+        print(f"[{issue.level}] {issue.message}")
+    print(f"result              : {len(report.errors)} error(s), "
+          f"{len(report.warnings)} warning(s)")
+    return report.exit_code()
+
+
+def cmd_batch(args) -> int:
+    text = _read_text(args.input, "input file")
+    if args.input.suffix.lower() == ".json":
+        spec = load_spec(args.input)
+        job_input = f"{args.input.stem}.inp"
+        nprocs, maxcore = spec.resources.nprocs, spec.resources.maxcore_mb
+    else:
+        report = parse_inp(text, args.input)
+        for issue in report.issues:
+            if issue.level != "info":
+                print(f"[{issue.level}] {issue.message}", file=sys.stderr)
+        if report.errors:
+            print(f"error: {args.input} has {len(report.errors)} error(s) and would not run; "
+                  "no script written", file=sys.stderr)
+            return 2
+        job_input = args.input.name
+        nprocs, maxcore = report.inp.nprocs, report.inp.maxcore_mb
+
+    try:
+        cfg = JobConfig(input_name=job_input, nprocs=nprocs or 1, maxcore_mb=maxcore,
+                        job_name=args.job_name or "", time_limit=args.time_limit,
+                        partition=args.partition, modules=tuple(args.module or ()),
+                        nodes=args.nodes, scheduler=args.scheduler)
+    except ValueError as exc:
+        raise CliError(str(exc)) from None
+    script = make_script(cfg)
+    for note in script.warnings:
+        print(f"[warning] {note}", file=sys.stderr)
+    _emit(script.text, args.output)
+    return 0
+
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -226,6 +346,28 @@ def build_parser() -> argparse.ArgumentParser:
     x = sub.add_parser("run", help="run ORCA on an .inp, then parse the result")
     x.add_argument("input", type=Path)
     x.set_defaults(func=cmd_run)
+
+    ck = sub.add_parser("check", help="check a hand-written .inp: keywords, %% blocks, "
+                                      "resources, coordinates, scan")
+    ck.add_argument("infile", type=Path)
+    ck.add_argument("--json", action="store_true", help="machine-readable report")
+    ck.add_argument("--no-hardware", action="store_true",
+                    help="skip the nprocs x maxcore check against this machine")
+    ck.set_defaults(func=cmd_check)
+
+    b = sub.add_parser("batch", help="SLURM or PBS script for an .inp (or a spec JSON)")
+    b.add_argument("input", type=Path, help=".inp to submit, or a spec .json to render+run")
+    b.add_argument("--scheduler", choices=["slurm", "pbs"], default="slurm")
+    b.add_argument("--job-name", help="default: the input file name")
+    b.add_argument("--partition", help="SLURM partition or PBS queue")
+    b.add_argument("--time", dest="time_limit", default="24:00:00",
+                   help="wall time, e.g. 24:00:00 or 2-12:00:00 (default 24:00:00)")
+    b.add_argument("--nodes", type=int, default=1,
+                   help="nodes; ORCA runs on one node by default (1)")
+    b.add_argument("--module", action="append", metavar="MODULE",
+                   help="module to load, repeatable (e.g. --module orca/6.1.1)")
+    b.add_argument("-o", "--output", type=Path, help="write the script here instead of stdout")
+    b.set_defaults(func=cmd_batch)
 
     xy = sub.add_parser("xyz", help="write the last (or all) geometries of an .out as .xyz")
     xy.add_argument("outfile", type=Path)
@@ -264,7 +406,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except CliError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except BrokenPipeError:
+        # `orca-assistant parse job.out | head` closes the pipe early. Point the
+        # descriptor at /dev/null so the flush at exit is silent, and close
+        # nothing: stdout belongs to the caller.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
 
 
 def parse_main(argv: list[str] | None = None) -> int:

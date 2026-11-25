@@ -34,3 +34,16 @@ def test_scan_requires_spec():
 def test_lint_double_dispersion():
     s = _spec(method=Method(functional="wB97X-D3", basis="def2-TZVP", dispersion="D3BJ"))
     assert any("double-count" in i.message for i in lint(s))
+
+
+def test_dispersion_is_not_written_twice():
+    """A functional that carries D3 already: the extra field must not reach ORCA."""
+    s = _spec(method=Method(functional="wB97X-D3", basis="def2-TZVP", dispersion="D3BJ"))
+    tokens = render_input(s).splitlines()[0].split()
+    assert "wB97X-D3" in tokens
+    assert "D3BJ" not in tokens
+
+
+def test_plain_functional_keeps_its_dispersion():
+    s = _spec(method=Method(functional="B3LYP", basis="def2-TZVP", dispersion="D4"))
+    assert "! B3LYP def2-TZVP D4" in render_input(s).splitlines()[0]

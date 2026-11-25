@@ -24,7 +24,7 @@ def _bang_line(spec: CalcSpec) -> str:
     kw: list[str] = [m.functional]
     if m.basis and not m.is_composite:
         kw.append(m.basis)
-    if m.dispersion and not m.is_composite:
+    if m.dispersion and not m.is_composite and not m.carries_dispersion:
         kw.append(m.dispersion)
     if not m.is_composite:
         kw.append("def2/J")
