@@ -145,3 +145,18 @@ GNOME screen reader. `run`, `queue` and the generated batch scripts use the
 first `orca` found in `PATH`: check with `which -a orca` that the
 quantum-chemistry ORCA comes first, or pass its full path
 (`submit --orca /path/to/orca`).
+
+## Diagnosing failed runs
+
+`orca-assistant diagnose file.out [--json]` explains what went wrong or looks
+suspicious: unrecognised keywords (e.g. a misspelt basis set), impossible
+charge/multiplicity (with the valid multiplicities), SCF that did not
+converge, optimisation stopped at the cycle limit, imaginary frequencies in a
+minimum search (or a wrong number in a transition-state search), and output
+that ends without a termination message. Each finding has the evidence from
+the output and a suggested remedy. The rules read the text of the output, not
+the exit code: ORCA can stop with an error and still return 0. The message
+formats come from real ORCA 6.1.1 outputs (kept in `tests/data/fail_*.out`);
+other ORCA versions may word them differently. Running out of memory is only
+reported as a guess ("output ends abruptly"): ORCA accepted even `%maxcore 10`
+in our tests and we have no real out-of-memory output yet.

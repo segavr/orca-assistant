@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .batch import DEFAULT_TIME, SCHEDULERS, SUBMIT_COMMAND, SUFFIX, BatchSpec, build_script
 from .batch import submit as submit_script
+from .diagnose import diagnose, format_findings
 from .extract import extract, parse_geometries, write_xyz
 from .lint import lint
 from .parser import ParsedOutput, parse_file
@@ -246,6 +247,18 @@ def cmd_submit(args) -> int:
     return 0
 
 
+def cmd_diagnose(args) -> int:
+    if not args.file.exists():
+        print(f"file not found: {args.file}", file=sys.stderr)
+        return 3
+    findings = diagnose(args.file.read_text(errors="replace"))
+    if args.json:
+        print(json.dumps([f.to_dict() for f in findings], indent=2, ensure_ascii=False))
+    else:
+        sys.stdout.write(format_findings(findings))
+    return 1 if findings else 0
+
+
 def cmd_parse(args) -> int:
     res = parse_file(args.output)
     extras = extract(args.output.read_text(errors="replace"))
@@ -365,6 +378,12 @@ def build_parser() -> argparse.ArgumentParser:
     sb.add_argument("--submit", action="store_true",
                     help="also run sbatch/qsub (only on a cluster login node)")
     sb.set_defaults(func=cmd_submit)
+
+    dg = sub.add_parser("diagnose", help="explain what went wrong (or looks suspicious) "
+                                         "in an ORCA .out file")
+    dg.add_argument("file", type=Path)
+    dg.add_argument("--json", action="store_true")
+    dg.set_defaults(func=cmd_diagnose)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)

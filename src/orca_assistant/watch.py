@@ -21,7 +21,7 @@ _CONV = re.compile(
 _RUNTIME = re.compile(
     r"TOTAL RUN TIME:\s+(\d+) days (\d+) hours (\d+) minutes (\d+) seconds (\d+) msec")
 _ERROR = re.compile(r"ORCA finished by error termination in (\S+)")
-_FATAL = re.compile(r"^\[file orca_main/[^\]]*\]: (.+)$", re.M)
+_FATAL = re.compile(r"^\[file orca_main/[^\]]*\]:[ \t]*(.*)$", re.M)
 
 
 @dataclass
@@ -85,7 +85,12 @@ def parse_progress(text: str) -> Progress:
     p.failed = not p.finished and (err is not None or fatal is not None
                                    or "aborting the run" in text)
     if fatal:
-        p.notes.append(f"ORCA stopped: {fatal.group(1).strip()}")
+        msg = fatal.group(1).strip()
+        if not msg:
+            from .diagnose import diagnose
+            errors = [f for f in diagnose(text) if f.severity == "error"]
+            msg = errors[0].title if errors else "see the output file"
+        p.notes.append(f"ORCA stopped: {msg}")
     if err:
         p.notes.append(f"ORCA error termination in {err.group(1)}")
     if "SCF NOT CONVERGED AFTER" in text:

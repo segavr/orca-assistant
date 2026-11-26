@@ -163,3 +163,15 @@ def test_final_scf_after_converged_optimisation_is_labelled():
     p = parse_progress(text)
     assert p.state == "scf" and p.opt_converged
     assert "final SCF after the optimisation" in format_status(p)
+
+
+def test_input_error_with_empty_message_is_failure_with_reason():
+    text = (HEAD + "            !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+            "                                 INPUT ERROR\n"
+            "            UNRECOGNIZED OR DUPLICATED KEYWORD(S) IN SIMPLE INPUT LINE\n"
+            "              DEF2-SVPP \n"
+            "            !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+            "[file orca_main/main_input_keywordline.cpp, line 13872]: \n")
+    p = parse_progress(text)
+    assert p.state == "failed"
+    assert any("Unrecognised or duplicated keyword" in n for n in p.notes)
