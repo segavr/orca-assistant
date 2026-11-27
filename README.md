@@ -174,3 +174,16 @@ multiplicity is applied only when you ask for it with `--multiplicity` after
 a charge/multiplicity error, because it sets the spin state. Unknown keywords
 get "did you mean" suggestions from a list of common names but are not
 replaced. Imaginary frequencies are not fixed automatically yet.
+
+## Careful automatic restart
+
+`orca-assistant auto job.inp [--max-attempts 3]` runs ORCA, diagnoses the
+output and, if the problem has a safe automatic fix (SCF convergence aids, a
+restart after the optimisation cycle limit), writes `job_fix1.inp` and runs
+again, up to `--max-attempts` runs in total (default 3, at most 10). It stops
+immediately when something needs your decision (multiplicity or charge,
+unknown keywords, imaginary frequencies, errors without a rule) or when
+nothing more can be fixed automatically. Nothing is overwritten: every
+attempt has its own input and output, and a journal `job_auto1.md` records
+the findings, the changes with their diff and the outcome of each attempt.
+Exit code 0 means the last attempt ran without problems.

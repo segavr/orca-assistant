@@ -9,6 +9,8 @@ from pathlib import Path
 
 from .batch import DEFAULT_TIME, SCHEDULERS, SUBMIT_COMMAND, SUFFIX, BatchSpec, build_script
 from .batch import submit as submit_script
+from .autorun import (default_runner, format_journal, format_summary, next_journal_path,
+                      run_with_retries)
 from .diagnose import diagnose, format_findings
 from .extract import extract, parse_geometries, write_xyz
 from .fix import make_fix, next_fix_path
@@ -301,6 +303,27 @@ def cmd_fix(args) -> int:
     return 0
 
 
+def cmd_auto(args) -> int:
+    if not args.input.exists():
+        print(f"input file not found: {args.input}", file=sys.stderr)
+        return 3
+    orca = shutil.which("orca")
+    if not orca:
+        print("ORCA not found in PATH.", file=sys.stderr)
+        return 2
+    inp = args.input.resolve()
+    try:
+        result = run_with_retries(inp, default_runner(orca), max_attempts=args.max_attempts)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    journal = next_journal_path(inp)
+    journal.write_text(format_journal(result, inp))
+    sys.stdout.write(format_summary(result))
+    print(f"journal: {journal}", file=sys.stderr)
+    return {"ok": 0, "interrupted": 130}.get(result.status, 1)
+
+
 def cmd_parse(args) -> int:
     res = parse_file(args.output)
     extras = extract(args.output.read_text(errors="replace"))
@@ -437,6 +460,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="restart geometry (.xyz) instead of the last one in the .out")
     fx.add_argument("-o", "--output", type=Path, help="new input (default: <name>_fix1.inp)")
     fx.set_defaults(func=cmd_fix)
+
+    au = sub.add_parser("auto", help="run ORCA and, if it fails in a fixable way, rerun with "
+                                     "safe corrections (limited attempts, with a journal)")
+    au.add_argument("input", type=Path)
+    au.add_argument("--max-attempts", type=int, default=3,
+                    help="total number of runs including the first (default 3, at most 10)")
+    au.set_defaults(func=cmd_auto)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)
