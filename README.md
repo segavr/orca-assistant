@@ -160,3 +160,17 @@ formats come from real ORCA 6.1.1 outputs (kept in `tests/data/fail_*.out`);
 other ORCA versions may word them differently. Running out of memory is only
 reported as a guess ("output ends abruptly"): ORCA accepted even `%maxcore 10`
 in our tests and we have no real out-of-memory output yet.
+
+## Fixing a failed run
+
+`orca-assistant fix job.out [--inp job.inp] [--multiplicity N] [--geometry
+last.xyz] [-o new.inp]` writes a corrected copy of the input next to the
+original (`job_fix1.inp`, then `job_fix2.inp`, ...; nothing is ever
+overwritten) and prints the exact diff. Only changes that do not alter the
+physics are made automatically: `SlowConv` (then `VerySlowConv`) and a higher
+`%scf MaxIter` for a non-converged SCF; the last geometry and a higher
+`%geom MaxIter` for an optimisation that hit the cycle limit. A new
+multiplicity is applied only when you ask for it with `--multiplicity` after
+a charge/multiplicity error, because it sets the spin state. Unknown keywords
+get "did you mean" suggestions from a list of common names but are not
+replaced. Imaginary frequencies are not fixed automatically yet.

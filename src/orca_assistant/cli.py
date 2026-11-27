@@ -11,6 +11,7 @@ from .batch import DEFAULT_TIME, SCHEDULERS, SUBMIT_COMMAND, SUFFIX, BatchSpec, 
 from .batch import submit as submit_script
 from .diagnose import diagnose, format_findings
 from .extract import extract, parse_geometries, write_xyz
+from .fix import make_fix, next_fix_path
 from .lint import lint
 from .parser import ParsedOutput, parse_file
 from .jobqueue import all_ok, format_results, run_queue
@@ -259,6 +260,47 @@ def cmd_diagnose(args) -> int:
     return 1 if findings else 0
 
 
+def cmd_fix(args) -> int:
+    out = args.file
+    if not out.exists():
+        print(f"file not found: {out}", file=sys.stderr)
+        return 3
+    inp = args.inp or out.with_suffix(".inp")
+    if not inp.exists():
+        print(f"input file not found: {inp} (use --inp)", file=sys.stderr)
+        return 3
+    geometry = None
+    if args.geometry:
+        if not args.geometry.exists():
+            print(f"geometry file not found: {args.geometry}", file=sys.stderr)
+            return 3
+        geometry = args.geometry.read_text(errors="replace")
+    res = make_fix(inp.read_text(errors="replace"), out.read_text(errors="replace"),
+                   multiplicity=args.multiplicity, geometry_text=geometry)
+    if res.changes:
+        print("changes:")
+        for c in res.changes:
+            print(f"  - {c}")
+    if res.skipped:
+        print("not changed automatically:")
+        for s in res.skipped:
+            print(f"  - {s}")
+    if res.text is None:
+        if not res.changes and not res.skipped:
+            print("nothing to fix: no problem found in the output")
+        return 1
+    dest = args.output or next_fix_path(inp)
+    if dest.exists():
+        print(f"error: {dest} already exists; not overwriting", file=sys.stderr)
+        return 1
+    dest.write_text(res.text)
+    print()
+    sys.stdout.write(res.diff)
+    print(f"wrote {dest} (the original was not touched)", file=sys.stderr)
+    print(f"run it with: orca-assistant run {dest}", file=sys.stderr)
+    return 0
+
+
 def cmd_parse(args) -> int:
     res = parse_file(args.output)
     extras = extract(args.output.read_text(errors="replace"))
@@ -384,6 +426,17 @@ def build_parser() -> argparse.ArgumentParser:
     dg.add_argument("file", type=Path)
     dg.add_argument("--json", action="store_true")
     dg.set_defaults(func=cmd_diagnose)
+
+    fx = sub.add_parser("fix", help="write a corrected copy of the input for the problem "
+                                    "found in an .out file (the original is never changed)")
+    fx.add_argument("file", type=Path, help="the .out file of the failed or doubtful run")
+    fx.add_argument("--inp", type=Path, help="the input that produced it (default: same name, .inp)")
+    fx.add_argument("--multiplicity", type=int,
+                    help="new multiplicity, used only after a charge/multiplicity error")
+    fx.add_argument("--geometry", type=Path,
+                    help="restart geometry (.xyz) instead of the last one in the .out")
+    fx.add_argument("-o", "--output", type=Path, help="new input (default: <name>_fix1.inp)")
+    fx.set_defaults(func=cmd_fix)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)
