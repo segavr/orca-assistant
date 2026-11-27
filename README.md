@@ -187,3 +187,15 @@ nothing more can be fixed automatically. Nothing is overwritten: every
 attempt has its own input and output, and a journal `job_auto1.md` records
 the findings, the changes with their diff and the outcome of each attempt.
 Exit code 0 means the last attempt ran without problems.
+
+## Checking a hand-written input
+
+`orca-assistant check job.inp [--json]` checks an input before you run it:
+impossible charge/multiplicity (computed from the atoms, exactly the error ORCA
+raises), a missing `!` line or coordinates, an unclosed coordinate block or
+`%` block, a missing `* xyzfile`, duplicated keywords, `-3c` methods given a
+basis set, double-counted dispersion, very low `MaxIter` limits, `OptTS`
+without a Hessian, and `nprocs x maxcore` against the cores and RAM of the
+machine. Possible misspellings are only hints, because the list of common
+keyword names is not exhaustive. Exit code 1 means at least one error.
+Differences between ORCA versions are not checked yet.

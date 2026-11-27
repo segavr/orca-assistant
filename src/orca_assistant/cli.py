@@ -14,6 +14,7 @@ from .autorun import (default_runner, format_journal, format_summary, next_journ
 from .diagnose import diagnose, format_findings
 from .extract import extract, parse_geometries, write_xyz
 from .fix import make_fix, next_fix_path
+from .inplint import format_issues, lint_input
 from .lint import lint
 from .parser import ParsedOutput, parse_file
 from .jobqueue import all_ok, format_results, run_queue
@@ -324,6 +325,19 @@ def cmd_auto(args) -> int:
     return {"ok": 0, "interrupted": 130}.get(result.status, 1)
 
 
+def cmd_check(args) -> int:
+    if not args.file.exists():
+        print(f"file not found: {args.file}", file=sys.stderr)
+        return 3
+    issues = lint_input(args.file.read_text(errors="replace"), hardware=detect_hardware(),
+                        base_dir=args.file.resolve().parent)
+    if args.json:
+        print(json.dumps([i.to_dict() for i in issues], indent=2, ensure_ascii=False))
+    else:
+        sys.stdout.write(format_issues(issues))
+    return 1 if any(i.level == "error" for i in issues) else 0
+
+
 def cmd_parse(args) -> int:
     res = parse_file(args.output)
     extras = extract(args.output.read_text(errors="replace"))
@@ -467,6 +481,12 @@ def build_parser() -> argparse.ArgumentParser:
     au.add_argument("--max-attempts", type=int, default=3,
                     help="total number of runs including the first (default 3, at most 10)")
     au.set_defaults(func=cmd_auto)
+
+    ck = sub.add_parser("check", help="check a hand-written .inp before running it "
+                                      "(multiplicity, blocks, keywords, memory)")
+    ck.add_argument("file", type=Path)
+    ck.add_argument("--json", action="store_true")
+    ck.set_defaults(func=cmd_check)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)
