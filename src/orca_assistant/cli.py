@@ -15,6 +15,8 @@ from .diagnose import diagnose, format_findings
 from .extract import extract, parse_geometries, write_xyz
 from .fix import make_fix, next_fix_path
 from .inplint import format_issues, lint_input
+from .doctor import run_doctor
+from .orcafind import find_orca
 from .lint import lint
 from .parser import ParsedOutput, parse_file
 from .jobqueue import all_ok, format_results, run_queue
@@ -142,7 +144,7 @@ def cmd_run(args) -> int:
     if not args.input.exists():
         print(f"input file not found: {args.input}", file=sys.stderr)
         return 3
-    orca = shutil.which("orca")
+    orca = _orca_path()
     if not orca:
         print("ORCA not found in PATH.", file=sys.stderr)
         return 2
@@ -208,7 +210,7 @@ def cmd_plot(args) -> int:
 
 
 def cmd_queue(args) -> int:
-    orca = shutil.which("orca")
+    orca = _orca_path()
     if not orca:
         print("ORCA not found in PATH.", file=sys.stderr)
         return 2
@@ -308,7 +310,7 @@ def cmd_auto(args) -> int:
     if not args.input.exists():
         print(f"input file not found: {args.input}", file=sys.stderr)
         return 3
-    orca = shutil.which("orca")
+    orca = _orca_path()
     if not orca:
         print("ORCA not found in PATH.", file=sys.stderr)
         return 2
@@ -336,6 +338,35 @@ def cmd_check(args) -> int:
     else:
         sys.stdout.write(format_issues(issues))
     return 1 if any(i.level == "error" for i in issues) else 0
+
+
+def _orca_path() -> str | None:
+    found = find_orca()
+    if found.path is None:
+        print("ORCA not found: " + (found.problem or "no usable 'orca' in PATH."),
+              file=sys.stderr)
+        for s in found.skipped:
+            print(f"  skipped {s}", file=sys.stderr)
+        print("  run 'orca-assistant doctor' for details", file=sys.stderr)
+    elif found.verdict == "unconfirmed":
+        print(f"[orca] using {found.path}, but nothing next to it confirms it is ORCA",
+              file=sys.stderr)
+    return found.path
+
+
+def cmd_doctor(args) -> int:
+    import importlib.metadata as md
+
+    def version_of(name):
+        try:
+            return md.version(name)
+        except md.PackageNotFoundError:
+            return None
+
+    report = run_doctor(find_orca, detect_hardware, shutil.which, version_of,
+                        sys.version.split()[0])
+    sys.stdout.write(report.text)
+    return 0 if report.ok else 1
 
 
 def cmd_parse(args) -> int:
@@ -487,6 +518,10 @@ def build_parser() -> argparse.ArgumentParser:
     ck.add_argument("file", type=Path)
     ck.add_argument("--json", action="store_true")
     ck.set_defaults(func=cmd_check)
+
+    dr = sub.add_parser("doctor", help="check the environment: which ORCA is used, "
+                                       "optional packages, cores and memory")
+    dr.set_defaults(func=cmd_doctor)
 
     pa = sub.add_parser("parse", help="summarise an ORCA .out file")
     pa.add_argument("output", type=Path)

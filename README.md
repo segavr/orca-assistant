@@ -199,3 +199,15 @@ without a Hessian, and `nprocs x maxcore` against the cores and RAM of the
 machine. Possible misspellings are only hints, because the list of common
 keyword names is not exhaustive. Exit code 1 means at least one error.
 Differences between ORCA versions are not checked yet.
+
+## Which ORCA is used
+
+`run`, `queue` and `auto` use the first program called `orca` in `PATH` that is
+not the GNOME screen reader (on many desktop Linux systems `/usr/bin/orca` is a
+Python script that imports the `orca` package; it is recognised and skipped, so
+it is never started by mistake). A program with ORCA's helper programs
+(`orca_*`) next to it is reported as confirmed; one without them is still used,
+with a short warning. To choose explicitly, set
+`ORCA_ASSISTANT_ORCA=/full/path/orca` (it is used without any check).
+`orca-assistant doctor` shows the choice, the skipped candidates, optional
+packages, cores, memory and the cluster tools found on the machine.

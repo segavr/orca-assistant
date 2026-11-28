@@ -14,7 +14,7 @@ def fake_runner_factory(_orca):
 
 
 def test_auto_fixes_and_reruns(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("orca_assistant.cli.shutil.which", lambda _: "/fake/orca")
+    monkeypatch.setattr("orca_assistant.cli._orca_path", lambda: "/fake/orca")
     monkeypatch.setattr("orca_assistant.cli.default_runner", fake_runner_factory)
     inp = tmp_path / "j.inp"
     inp.write_text(INP)
@@ -25,7 +25,7 @@ def test_auto_fixes_and_reruns(tmp_path, monkeypatch, capsys):
 
 
 def test_auto_exit_code_when_the_limit_is_hit(tmp_path, monkeypatch):
-    monkeypatch.setattr("orca_assistant.cli.shutil.which", lambda _: "/fake/orca")
+    monkeypatch.setattr("orca_assistant.cli._orca_path", lambda: "/fake/orca")
     monkeypatch.setattr("orca_assistant.cli.default_runner",
                         lambda _o: (lambda inp: inp.with_suffix(".out").write_text(FAIL_OUT) and 0))
     inp = tmp_path / "j.inp"
@@ -34,7 +34,7 @@ def test_auto_exit_code_when_the_limit_is_hit(tmp_path, monkeypatch):
 
 
 def test_auto_without_orca(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("orca_assistant.cli.shutil.which", lambda _: None)
+    monkeypatch.setattr("orca_assistant.cli._orca_path", lambda: None)
     inp = tmp_path / "j.inp"
     inp.write_text(INP)
     assert main(["auto", str(inp)]) == 2
@@ -43,7 +43,7 @@ def test_auto_without_orca(tmp_path, monkeypatch, capsys):
 
 def test_auto_missing_input_and_bad_limit(tmp_path, monkeypatch, capsys):
     assert main(["auto", str(tmp_path / "no.inp")]) == 3
-    monkeypatch.setattr("orca_assistant.cli.shutil.which", lambda _: "/fake/orca")
+    monkeypatch.setattr("orca_assistant.cli._orca_path", lambda: "/fake/orca")
     inp = tmp_path / "j.inp"
     inp.write_text(INP)
     assert main(["auto", str(inp), "--max-attempts", "99"]) == 1
